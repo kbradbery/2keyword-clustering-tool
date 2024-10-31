@@ -1,3 +1,7 @@
 streamlit
 pandas
 anthropic
+plotly
+pyvis
+networkx
+openpyxl
