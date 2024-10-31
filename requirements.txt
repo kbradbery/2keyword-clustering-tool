@@ -1,7 +1,9 @@
 streamlit
 pandas
 anthropic
-plotly
-pyvis
+numpy
 networkx
-openpyxl
+matplotlib
+plotly
+streamlit-echarts
+xlsxwriter
