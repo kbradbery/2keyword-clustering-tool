@@ -10,7 +10,7 @@ st.set_page_config(page_title="SEO Keyword Clustering Tool", layout="wide")
 # Initialize Anthropic client
 anthropic = Anthropic(api_key=st.secrets.get("ANTHROPIC_API_KEY") or st.secrets.get("anthropic").get("ANTHROPIC_API_KEY"))
 
-def chunk_keywords(df: pd.DataFrame, chunk_size: int = 100) -> List[pd.DataFrame]:
+def chunk_keywords(df: pd.DataFrame, chunk_size: int = 50) -> List[pd.DataFrame]:
     """Split keywords into smaller chunks to avoid token limits."""
     return np.array_split(df, max(1, len(df) // chunk_size))
 
@@ -22,15 +22,20 @@ def analyze_keywords_chunk(keywords_df: pd.DataFrame) -> Dict:
         for _, row in keywords_df.iterrows()
     ])
     
-    prompt = f"""Analyze these SEO keywords and create topical clusters. Keywords:
+    prompt = f"""Here are the SEO keywords to analyze:
     {keywords_str}
     
-    Create clusters based on semantic similarity and search intent.
-    Return response as JSON with this structure:
+    Create topical clusters based on semantic similarity. For each cluster:
+    1. Give it a descriptive name based on the main topic
+    2. List all related keywords
+    3. Identify the primary search intent
+    4. Suggest a content type and structure
+
+    Format your response as a valid JSON string with exactly this structure:
     {{
         "clusters": [
             {{
-                "name": "main topic",
+                "name": "name of cluster",
                 "keywords": ["keyword1", "keyword2"],
                 "intent": "search intent",
                 "content_suggestion": {{
@@ -40,17 +45,34 @@ def analyze_keywords_chunk(keywords_df: pd.DataFrame) -> Dict:
             }}
         ]
     }}
+
+    Make sure the JSON is valid and properly formatted. Include all keywords in appropriate clusters."""
     
-    Keep clusters focused and relevant. Prioritize user intent and search volume when grouping."""
-    
-    response = anthropic.messages.create(
-        model="claude-3-haiku-20240307",
-        max_tokens=4096,
-        temperature=0,
-        messages=[{"role": "user", "content": prompt}]
-    )
-    
-    return json.loads(response.content)
+    try:
+        response = anthropic.messages.create(
+            model="claude-3-haiku-20240307",
+            max_tokens=4096,
+            temperature=0,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        
+        # Extract JSON string from response
+        response_text = response.content
+        if isinstance(response_text, list):
+            response_text = response_text[0].text
+        
+        # Find JSON in the response
+        start_idx = response_text.find('{')
+        end_idx = response_text.rfind('}') + 1
+        if start_idx != -1 and end_idx != -1:
+            json_str = response_text[start_idx:end_idx]
+            return json.loads(json_str)
+        else:
+            raise ValueError("No valid JSON found in response")
+            
+    except Exception as e:
+        st.error(f"Error parsing Claude's response: {str(e)}")
+        return {"clusters": []}  # Return empty clusters on error
 
 def merge_clusters(all_results: List[Dict]) -> Dict:
     """Merge clusters from multiple chunks intelligently."""
@@ -58,6 +80,9 @@ def merge_clusters(all_results: List[Dict]) -> Dict:
     seen_topics = set()
     
     for result in all_results:
+        if not result or "clusters" not in result:
+            continue
+            
         for cluster in result["clusters"]:
             # Check if similar topic exists
             similar_exists = False
@@ -78,7 +103,7 @@ def merge_clusters(all_results: List[Dict]) -> Dict:
 st.title("🎯 SEO Keyword Clustering Tool")
 
 # File upload
-uploaded_file = st.file_uploader("Upload your keywords CSV (columns: keyword, search_volume, difficulty, intent)", type="csv")
+uploaded_file = st.file_uploader("Upload your keywords CSV (columns: keyword, search_volume, difficulty)", type="csv")
 
 if uploaded_file:
     try:
@@ -89,6 +114,11 @@ if uploaded_file:
         if not all(col in df.columns for col in required_columns):
             st.error(f"CSV must contain columns: {', '.join(required_columns)}")
         else:
+            # Clean and prepare data
+            df = df.dropna(subset=["keyword"])
+            df["search_volume"] = pd.to_numeric(df["search_volume"], errors="coerce").fillna(0)
+            df["difficulty"] = pd.to_numeric(df["difficulty"], errors="coerce").fillna(0)
+            
             # Show data preview
             st.write("Preview of uploaded keywords:")
             st.dataframe(df.head())
@@ -106,7 +136,8 @@ if uploaded_file:
                     for i, chunk in enumerate(chunks):
                         try:
                             chunk_result = analyze_keywords_chunk(chunk)
-                            all_results.append(chunk_result)
+                            if chunk_result and "clusters" in chunk_result:
+                                all_results.append(chunk_result)
                             progress_bar.progress((i + 1) / len(chunks))
                         except Exception as e:
                             st.warning(f"Warning: Error processing chunk {i+1}: {str(e)}")
@@ -123,8 +154,8 @@ if uploaded_file:
                             for cluster in final_results["clusters"]:
                                 with st.expander(f"📑 {cluster['name']} ({cluster['intent']})"):
                                     st.write(f"**Keywords ({len(cluster['keywords'])}):**")
-                                    keywords_df = pd.DataFrame(cluster["keywords"])
-                                    st.dataframe(keywords_df)
+                                    cluster_df = pd.DataFrame(cluster["keywords"], columns=["keyword"])
+                                    st.dataframe(cluster_df)
                         
                         with tab2:
                             for cluster in final_results["clusters"]:
@@ -156,7 +187,6 @@ with st.sidebar:
         - keyword
         - search_volume
         - difficulty
-        - intent (optional)
     
     2. Upload the file
     
@@ -164,13 +194,13 @@ with st.sidebar:
     
     ### 📊 Sample CSV Format:
     ```csv
-    keyword,search_volume,difficulty,intent
-    seo tools,1200,45,informational
-    best seo software,890,38,commercial
+    keyword,search_volume,difficulty
+    seo tools,1200,45
+    best seo software,890,38
     ```
     
     ### ℹ️ Tips
-    - Larger keyword sets will take longer to process
-    - Keywords are processed in chunks for better reliability
+    - Keep chunks small for better processing
     - Similar topics are automatically merged
+    - Download results for backup
     """)
