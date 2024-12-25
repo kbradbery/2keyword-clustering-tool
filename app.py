@@ -11,7 +11,7 @@ from io import BytesIO
 st.set_page_config(page_title="Advanced SEO Clustering Tool", layout="wide")
 
 # Initialize Anthropic API
-anthropic = Anthropic(api_key=st.secrets.get("ANTHROPIC_API_KEY") or st.secrets.get("anthropic").get("ANTHROPIC_API_KEY"))
+anthropic = Anthropic(api_key=st.secrets.get("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") or st.secrets.get("anthropic").get("ANTHROPIC_API_KEY"))
 
 class KeywordAnalyzer:
     def __init__(self, df: pd.DataFrame):
